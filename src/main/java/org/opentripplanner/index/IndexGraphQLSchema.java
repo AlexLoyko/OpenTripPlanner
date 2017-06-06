@@ -1,36 +1,28 @@
 package org.opentripplanner.index;
 
+import com.amazonaws.transform.MapEntry;
+
+import java.util.List;
+import java.util.function.Function;
+
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Multiset;
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Envelope;
 import com.vividsolutions.jts.geom.LineString;
 import graphql.Scalars;
 import graphql.relay.Relay;
 import graphql.relay.SimpleListConnection;
-import graphql.schema.DataFetcher;
-import graphql.schema.DataFetchingEnvironment;
-import graphql.schema.DataFetchingEnvironmentImpl;
-import graphql.schema.GraphQLArgument;
-import graphql.schema.GraphQLEnumType;
-import graphql.schema.GraphQLFieldDefinition;
-import graphql.schema.GraphQLInputObjectField;
-import graphql.schema.GraphQLInputObjectType;
-import graphql.schema.GraphQLInterfaceType;
-import graphql.schema.GraphQLList;
-import graphql.schema.GraphQLNonNull;
-import graphql.schema.GraphQLObjectType;
-import graphql.schema.GraphQLOutputType;
-import graphql.schema.GraphQLSchema;
-import graphql.schema.GraphQLType;
-import graphql.schema.GraphQLTypeReference;
-import graphql.schema.PropertyDataFetcher;
-import graphql.schema.TypeResolver;
+import graphql.schema.*;
 import org.onebusaway.gtfs.model.Agency;
 import org.onebusaway.gtfs.model.AgencyAndId;
 import org.onebusaway.gtfs.model.Route;
 import org.onebusaway.gtfs.model.Stop;
 import org.onebusaway.gtfs.model.Trip;
 import org.onebusaway.gtfs.model.calendar.ServiceDate;
+import org.opentripplanner.api.adapters.MapAdapter;
 import org.opentripplanner.api.common.Message;
 import org.opentripplanner.api.model.Itinerary;
 import org.opentripplanner.api.model.Leg;
@@ -61,6 +53,7 @@ import org.opentripplanner.routing.edgetype.Timetable;
 import org.opentripplanner.routing.edgetype.TimetableSnapshot;
 import org.opentripplanner.routing.edgetype.TripPattern;
 import org.opentripplanner.routing.error.VertexNotFoundException;
+import org.opentripplanner.routing.graph.Graph;
 import org.opentripplanner.routing.graph.GraphIndex;
 import org.opentripplanner.routing.graph.GraphIndex.PlaceAndDistance;
 import org.opentripplanner.routing.trippattern.RealTimeState;
@@ -75,6 +68,7 @@ import java.text.ParseException;
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.Map;
 
 import static java.util.Collections.emptyList;
 
@@ -166,6 +160,8 @@ public class IndexGraphQLSchema {
         .build();
 
     private final GtfsRealtimeFuzzyTripMatcher fuzzyTripMatcher;
+
+    public GraphQLOutputType routeHeadsignMapType = new GraphQLTypeReference("RouteHeadsignMapType");
 
     public GraphQLOutputType agencyType = new GraphQLTypeReference("Agency");
 
@@ -314,6 +310,7 @@ public class IndexGraphQLSchema {
         }
         return agencies;
     }
+
 
     @SuppressWarnings("unchecked")
     public IndexGraphQLSchema(GraphIndex index) {
@@ -947,6 +944,23 @@ public class IndexGraphQLSchema {
                 .build())
             .build();
 
+        routeHeadsignMapType = GraphQLObjectType.newObject()
+                .name("RouteHeadsignMapType")
+                .description("Route mapped with its most popular headsign")
+                .field(GraphQLFieldDefinition.newFieldDefinition()
+                        .name("route")
+                        .description("Route")
+                        .type(routeType)
+                        .dataFetcher(environment -> ((Map.Entry<Route,String>) environment.getSource()).getKey())
+                        .build())
+                .field(GraphQLFieldDefinition.newFieldDefinition()
+                        .name("headsign")
+                        .description("The most popular headsign for a route")
+                        .type(Scalars.GraphQLString)
+                        .dataFetcher(environment -> ((Map.Entry<Route,String>) environment.getSource()).getValue())
+                        .build())
+                .build();
+
         stopType = GraphQLObjectType.newObject()
             .name("Stop")
             .withInterface(nodeInterface)
@@ -1081,6 +1095,69 @@ public class IndexGraphQLSchema {
                 .name("patterns")
                 .type(new GraphQLList(patternType))
                 .dataFetcher(environment -> index.patternsForStop.get(environment.getSource()))
+                .build())
+            .field(GraphQLFieldDefinition.newFieldDefinition()
+                .name("topDestinationsForToday")
+                .type(new GraphQLList(routeHeadsignMapType))
+                .argument(GraphQLArgument.newArgument()
+                    .name("serviceDay")
+                    .type(Scalars.GraphQLString)
+                    .defaultValue(null)
+                    .build())
+                .dataFetcher(environment -> {
+                      try {
+                          BitSet services = index.servicesRunning(
+                                  ServiceDate.parseString(environment.getArgument("serviceDay"))
+                          );
+
+                          List<Map.Entry<Route, String>> routeHeadsignList = new ArrayList<Map.Entry<Route, String>>();
+                          Map<Route, Long> routeTripCount = new HashMap<Route, Long>();
+                          index.routesForStop(((Stop)environment
+                                    .getSource()))
+                                    .stream()
+                                    .forEach((route) -> {
+                                    Map<TripPattern, Long> tripCountMap = new HashMap<TripPattern, Long>();
+
+                                    if(!routeTripCount.containsValue(route))
+                                        routeTripCount.put(route, new Long(0));
+                                    index.patternsForStop.get((Stop)environment.getSource())
+                                         .stream()
+                                         .filter(pattern -> index.patternsForRoute.get(route).contains(pattern))
+                                         .forEach((pattern) -> {
+                                             long count = pattern.scheduledTimetable.tripTimes
+                                                     .stream()
+                                                     .filter(times -> services.get(times.serviceCode))
+                                                     .map(times -> times.trip).count();
+
+                                              tripCountMap.put(pattern, count);
+                                              routeTripCount.put(route, routeTripCount.get(route)+ count);
+                                         });
+
+                                         String headsignForRoute = tripCountMap
+                                                                         .entrySet()
+                                                                         .stream()
+                                                                         .max(Map.Entry.comparingByValue())
+                                                                         .get()
+                                                                         .getKey()
+                                                                         .getDirection();
+
+                                         routeHeadsignList.add(new AbstractMap.SimpleEntry<Route, String>(route, headsignForRoute));
+                                    });
+
+                          if(routeHeadsignList != null) {
+
+                              routeHeadsignList.sort((Map.Entry<Route, String> e1, Map.Entry<Route, String> e2) ->
+                                      (int) (routeTripCount.get(e2.getKey()) - routeTripCount.get(e1.getKey())));
+                              return routeHeadsignList;
+                          }
+
+
+                          return null;
+
+                      } catch (ParseException e) {
+                             return null; // Invalid date format
+                      }
+                   })
                 .build())
             .field(GraphQLFieldDefinition.newFieldDefinition()
                 .name("transfers")               //TODO: add max distance as parameter?
