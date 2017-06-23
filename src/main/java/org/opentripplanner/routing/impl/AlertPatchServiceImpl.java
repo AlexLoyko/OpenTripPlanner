@@ -84,8 +84,10 @@ public class AlertPatchServiceImpl implements AlertPatchService {
         if (stop != null) {
             patchesByStop.put(stop, alertPatch);
         }
-        AgencyAndId route = alertPatch.getRoute();
-        if (route != null) {
+
+        List<AgencyAndId> routes = alertPatch.getRoutes();
+        for( AgencyAndId route: routes)
+        {
             patchesByRoute.put(route, alertPatch);
         }
     }

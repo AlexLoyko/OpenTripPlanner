@@ -1057,9 +1057,14 @@ public class GraphIndex {
 
     public List<AlertPatch> getAlertsForRoute(Route route) {
         return getAlertPatchStream()
-            .filter(alertPatch -> alertPatch.getRoute() != null)
-            .filter(alertPatch -> route.getId().equals(alertPatch.getRoute()))
-            .collect(Collectors.toList());
+                .filter(alertPatch -> {
+                    for(AgencyAndId routeInAlerts: alertPatch.getRoutes())
+                        if(routeInAlerts != null && route.getId().equals(routeInAlerts))
+                            return true;
+
+                    return false;
+                })
+                .collect(Collectors.toList());
     }
 
     public List<AlertPatch> getAlertsForTrip(Trip trip) {

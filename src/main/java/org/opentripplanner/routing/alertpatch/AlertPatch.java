@@ -68,6 +68,8 @@ public class AlertPatch implements Serializable {
 
     private AgencyAndId route;
 
+    private List<AgencyAndId> routes = new LinkedList<>();
+
     private AgencyAndId trip;
 
     private AgencyAndId stop;
@@ -283,6 +285,11 @@ public class AlertPatch implements Serializable {
         return route;
     }
 
+    public List<AgencyAndId> getRoutes() {
+        return routes;
+    }
+
+
     @XmlJavaTypeAdapter(AgencyAndIdAdapter.class)
     public AgencyAndId getTrip() {
         return trip;
@@ -299,6 +306,18 @@ public class AlertPatch implements Serializable {
 
     public void setRoute(AgencyAndId route) {
         this.route = route;
+    }
+
+    public void setRoutes(List<AgencyAndId> routes) { this.routes = routes; }
+
+    public void addRoute(AgencyAndId route) {
+
+        for ( AgencyAndId entry : routes)
+        {
+            if (entry.equals(route))
+                return;
+        }
+        routes.add(route);
     }
 
     public void setTrip(AgencyAndId trip) {
