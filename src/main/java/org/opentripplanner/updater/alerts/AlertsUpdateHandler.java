@@ -117,7 +117,8 @@ public class AlertsUpdateHandler {
             else if (informed.hasTrip() && informed.getTrip().hasRouteId())
             {
                 String tempRouteId = informed.getTrip().getRouteId();
-                routeId = tempRouteId.substring(tempRouteId.indexOf("_")+1);
+                tempRouteId = tempRouteId.substring(tempRouteId.indexOf("_")+1);
+                routeId = tempRouteId;
             }
 
             int direction;
@@ -141,9 +142,13 @@ public class AlertsUpdateHandler {
             if (informed.hasAgencyId()) {
                 agencyId = informed.getAgencyId().intern();
             }
+            else {
+                if (informed.hasTrip() && informed.getTrip().hasRouteId()) {
+                    agencyId = informed.getTrip().getRouteId().substring(0, informed.getTrip().getRouteId().indexOf("_"));
+                }
+            }
 
-
-            patch.setFeedId(feedId);
+            patch.setFeedId(feedId); // passing feedId as usual
             if (routeId != null) {
                 patch.setRoute(new AgencyAndId(feedId, routeId));
                 patch.addRoute(patch.getRoute());

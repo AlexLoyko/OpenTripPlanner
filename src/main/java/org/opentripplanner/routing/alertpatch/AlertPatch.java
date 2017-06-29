@@ -122,6 +122,7 @@ public class AlertPatch implements Serializable {
             Map<String, Agency> agencies = graph.index.agenciesForFeedId.get(feedId);
             agency = this.agency != null ? agencies.get(this.agency) : null;
         }
+
         Route route = this.route != null ? graph.index.routeForId.get(this.route) : null;
         Stop stop = this.stop != null ? graph.index.stopForId.get(this.stop) : null;
         Trip trip = this.trip != null ? graph.index.tripForId.get(this.trip) : null;
